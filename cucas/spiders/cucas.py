@@ -34,9 +34,10 @@ class CucasSpider(scrapy.Spider):
             'name': response.css('.l_mid a::text').get(),
             'level': info_box[1],
             'type': info_box[2],
-            'location': ", ".join(info_box[3:])
+            'location': ", ".join(info_box[3:]),
+            'programs': []
         }
-        scrapy.Request(response.urljoin(admission), self.parse_admission, meta={'university': university})
+        return scrapy.Request(response.urljoin(admission), self.parse_admission, meta={'university': university})
 
 
     def parse_admission(self, response):
@@ -45,7 +46,7 @@ class CucasSpider(scrapy.Spider):
         each in its own tab, needs clicking to follow
         """
 
-        university = response.request.meta['university']
+        meta = response.request.meta
 
         levels = (("select_course(2)", 'undergraduate_data'),
                   ("select_course(3)", 'master_data'),
@@ -59,8 +60,12 @@ class CucasSpider(scrapy.Spider):
             if level_urls:
                 program_urls.extend(level_urls)
 
-        for url in program_urls:
-            yield scrapy.Request(url, self.parse_program, meta={'university': university})
+        if program_urls:
+            first_program_url = program_urls.pop(0)
+            meta.update({'program_urls': program_urls})
+            yield scrapy.Request(
+                first_program_url, self.parse_program,
+                meta=meta)
 
 
     def click_on_level(self, admission_url, onclick, data_title):
@@ -89,6 +94,8 @@ class CucasSpider(scrapy.Spider):
         self.logger.info("getting program info: ")
 
         try:
+            next_program_urls = response.request.meta['program_urls']
+
             program = {}
 
             """
@@ -141,9 +148,16 @@ class CucasSpider(scrapy.Spider):
             program['application_material'] = "\n".join(response.css('.m_4+div *::text').getall())
 
             university = response.request.meta['university']
-            university['program'] = program
+            university['programs'].append(program)
 
-            yield university
+            # stack programs into the university while there are some
+            if next_program_urls:
+                next_program_url = next_program_urls.pop(0)
+                yield scrapy.Request(
+                    next_program_url, self.parse_program,
+                    meta={'university': university, 'program_urls': next_program_urls})
+            else:
+                yield university
 
         except:
             self.logger.error("ERROR getting program info: ", exc_info=True)
