@@ -12,65 +12,77 @@ class CucasSpider(scrapy.Spider):
 
     browser = webdriver.Firefox()
 
+
     def parse(self, response):
-
         # find the list of all universities
-        universities = response.css('.xxSeaList a::attr(href)').getall()
-        universities = [u for u in universities if 'reviews' not in u]
+        univ_urls = [u for u in response.css('.xxSeaList a::attr(href)').getall()
+                     if 'reviews' not in u]
 
-        for university in universities:
-            yield scrapy.Request(university, self.parse_univ_main)
+        for univ_url in univ_urls:
+            yield scrapy.Request(univ_url, self.parse_univ_main)
+
 
     def parse_univ_main(self, response):
-        # once on a university: name, level, type and location
-        attr = response.css('.l_t_left p a::text').getall()
+
+        # we are on a university main page
+        # data to be scraped: name, level, type and location
+
+        info_box = response.css('.l_t_left p a::text').getall()
         admission = response.css('.tags li a::attr(href)').get().strip()
 
         university = {
             'name': response.css('.l_mid a::text').get(),
-            'level': attr[1],
-            'type': attr[2],
-            'location': ", ".join(attr[3:])
+            'level': info_box[1],
+            'type': info_box[2],
+            'location': ", ".join(info_box[3:])
         }
-        yield scrapy.Request(response.urljoin(admission), self.parse_admission, meta={'university': university})
+        scrapy.Request(response.urljoin(admission), self.parse_admission, meta={'university': university})
 
-    def click_on_program(self, onclick, data_title):
-        try:
-            bachelor_tab = self.browser.find_element_by_css_selector(f'.c_tab li[onclick="{onclick}"] a')
-            bachelor_tab.click()
-            time.sleep(2)
-            programs = self.browser.find_elements_by_css_selector(f'#{data_title} tr td:first-child a')
-            program_urls = []
-            for p in programs:
-                program_urls.append(p.get_attribute('href'))
-            return program_urls
-        except:
-            return None
 
     def parse_admission(self, response):
         """
-        once on admission there are three level programs bachelor, master and doctoral
+        On admission page there are three level programs bachelor, master and doctoral,
+        each in its own tab, needs clicking to follow
         """
-        self.browser.get(response.request.url)
 
         university = response.request.meta['university']
 
-        # bachelor
-        bachelors = self.click_on_program("select_course(2)", 'undergraduate_data')
-        if bachelors:
-            for url in bachelors:
-                yield scrapy.Request(url, self.parse_program, meta={'university': university})
+        levels = (("select_course(2)", 'undergraduate_data'),
+                  ("select_course(3)", 'master_data'),
+                  ("select_course(4)", 'doctor_data')
+                  )
 
-        # master
-        masters = self.click_on_program("select_course(3)", 'master_data')
-        if masters:
-            for url in masters:
-                yield scrapy.Request(url, self.parse_program, meta={'university': university})
+        program_urls = []
 
-        # doctor
-        doctors = self.click_on_program("select_course(4)", 'doctor_data')
-        for url in doctors:
+        for level in levels:
+            level_urls = self.click_on_level(response.request.url, *level)
+            if level_urls:
+                program_urls.extend(level_urls)
+
+        for url in program_urls:
             yield scrapy.Request(url, self.parse_program, meta={'university': university})
+
+
+    def click_on_level(self, admission_url, onclick, data_title):
+        """
+        Click on a certain program level to retrieve urls for each program detail.
+        Deals with the javascript onclick on site
+
+        :param onclick: the number for program (defined by the site)
+        :param data_title: tag id for the table data
+        :return: list of urls to scrape
+        """
+        try:
+            self.browser.get(admission_url)
+            level_tab = self.browser.find_element_by_css_selector(f'.c_tab li[onclick="{onclick}"] a')
+            level_tab.click()
+            time.sleep(2)
+
+            programs = self.browser.find_elements_by_css_selector(f'#{data_title} tr td:first-child a')
+
+            return [p.get_attribute('href') for p in programs]
+        except:
+            return None
 
 
     def parse_program(self, response):
@@ -106,7 +118,6 @@ class CucasSpider(scrapy.Spider):
             )
             program['tuition'] = descr_table.css('tr:nth-child(3) td:nth-child(2)::text').get()
             program['application_fee'] = descr_table.css('tr:nth-child(4) td:nth-child(2)::text').get()
-
 
             """        
             then on drop down menu you get program
