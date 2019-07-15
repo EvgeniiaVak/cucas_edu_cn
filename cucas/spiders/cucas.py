@@ -2,6 +2,7 @@
 import scrapy
 from selenium import webdriver
 import time
+from w3lib.html import remove_tags
 
 
 class CucasSpider(scrapy.Spider):
@@ -98,10 +99,6 @@ class CucasSpider(scrapy.Spider):
 
             program = {}
 
-            """
-            if inside the program for each: name, starting date, deadline, duration, and tuition.
-            """
-
             program['name'] = response.css('.title h3::text').get().strip()
             program['level'] = response.css('.title em::text').get().strip()
             date_duration_table = response.css('.hidden-sm .zhai table:nth-child(2)')
@@ -126,26 +123,11 @@ class CucasSpider(scrapy.Spider):
             program['tuition'] = descr_table.css('tr:nth-child(3) td:nth-child(2)::text').get()
             program['application_fee'] = descr_table.css('tr:nth-child(4) td:nth-child(2)::text').get()
 
-            """        
-            then on drop down menu you get program
-    
-             - description,
-             - entry requirement,
-             - fee structure,
-             - application material
-            """
+            program['description'] = parse_large_text_section(response.css('.m_2+div'))
+            program['entry_requirements'] = parse_large_text_section(response.css('.m_7+div'))
 
-            description = response.css('.m_2+div *::text').getall()
-            if description:
-                program['description'] = "\n".join(description)
-
-            requirements = response.css('.m_7+div *::text').getall()
-            requirements = [r.strip() for r in requirements]
-            requirements = [r for r in requirements if r]
-            program['entry_requirements'] = requirements
-
-            program['fees'] = "\n".join(response.css('.m_3+div table *::text').getall())
-            program['application_material'] = "\n".join(response.css('.m_4+div *::text').getall())
+            program['fees'] = parse_large_text_section(response.css('.m_3+div'))
+            program['application_material'] = parse_large_text_section(response.css('.m_4+div'))
 
             university = response.request.meta['university']
             university['programs'].append(program)
@@ -161,3 +143,27 @@ class CucasSpider(scrapy.Spider):
 
         except:
             self.logger.error("ERROR getting program info: ", exc_info=True)
+
+
+
+def parse_large_text_section(selector):
+    if not selector:
+        return None
+    result = []
+    children = selector.css('div > *')
+    for child in children:
+        tag_name = child.xpath('name()').get()
+        if tag_name == 'table':
+            result.append({'content': child.get()})
+        elif tag_name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+            result.append({'heading': child.css('::text').get()})
+        elif tag_name == 'div':
+            parse_large_text_section(child)
+        else:
+            child_text = child.get()
+            if child_text:
+                child_text = remove_tags(child_text)
+            if not child_text:
+                continue
+            result.append({'content': child_text})
+    return result
