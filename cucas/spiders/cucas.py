@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 import scrapy
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from w3lib.html import remove_tags
+
+TIMEOUT = 5
 
 
 class CucasSpider(scrapy.Spider):
@@ -88,16 +91,19 @@ class CucasSpider(scrapy.Spider):
         try:
 
             self.browser.get(admission_url)
-            level_tab = WebDriverWait(self.browser, 30).until(EC.presence_of_element_located((By.CSS_SELECTOR, f'.c_tab li[onclick="{onclick}"] a')))
+            level_tab = WebDriverWait(self.browser, TIMEOUT).until(EC.presence_of_element_located((By.CSS_SELECTOR, f'.c_tab li[onclick="{onclick}"] a')))
             # first move to the element
             self.browser.execute_script("return arguments[0].scrollIntoView(true);", level_tab)
             # then scroll by x, y values, in this case 10 pixels up
             self.browser.execute_script("window.scrollBy(0, -100);")
             level_tab.click()
 
-            programs = WebDriverWait(self.browser, 30).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, f'#{data_title} tr td:first-child a')))
+            programs = WebDriverWait(self.browser, TIMEOUT).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, f'#{data_title} tr td:first-child a')))
 
             return [p.get_attribute('href') for p in programs]
+        except TimeoutException:
+            self.logger.warn(f'Did not find {data_title} on {admission_url}')
+            return None
         except Exception as e:
             self.logger.exception(f'Execption during getting programs refs: {e}')
             return None
