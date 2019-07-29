@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 import scrapy
 from selenium import webdriver
-import time
+
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
 from w3lib.html import remove_tags
 
 
@@ -12,12 +15,15 @@ class CucasSpider(scrapy.Spider):
     custom_settings = {'FEED_FORMAT': 'json', 'FEED_URI': 'data/cucas_%(time)s.json'}
 
     browser = webdriver.Firefox()
+    browser.set_window_size(1600, 1200)
 
 
     def parse(self, response):
         # find the list of all universities
         univ_urls = [u for u in response.css('.xxSeaList a::attr(href)').getall()
                      if 'reviews' not in u]
+
+        self.logger.info(f'Found {len(univ_urls)} universities')
 
         for univ_url in univ_urls:
             yield scrapy.Request(univ_url, self.parse_univ_main)
@@ -49,9 +55,10 @@ class CucasSpider(scrapy.Spider):
 
         meta = response.request.meta
 
-        levels = (("select_course(2)", 'undergraduate_data'),
-                  ("select_course(3)", 'master_data'),
-                  ("select_course(4)", 'doctor_data')
+        levels = (
+                    ("select_course(2)", 'undergraduate_data'),
+                    ("select_course(3)", 'master_data'),
+                    ("select_course(4)", 'doctor_data')
                   )
 
         program_urls = []
@@ -79,20 +86,25 @@ class CucasSpider(scrapy.Spider):
         :return: list of urls to scrape
         """
         try:
-            self.browser.get(admission_url)
-            level_tab = self.browser.find_element_by_css_selector(f'.c_tab li[onclick="{onclick}"] a')
-            level_tab.click()
-            time.sleep(2)
 
-            programs = self.browser.find_elements_by_css_selector(f'#{data_title} tr td:first-child a')
+            self.browser.get(admission_url)
+            level_tab = WebDriverWait(self.browser, 30).until(EC.presence_of_element_located((By.CSS_SELECTOR, f'.c_tab li[onclick="{onclick}"] a')))
+            # first move to the element
+            self.browser.execute_script("return arguments[0].scrollIntoView(true);", level_tab)
+            # then scroll by x, y values, in this case 10 pixels up
+            self.browser.execute_script("window.scrollBy(0, -100);")
+            level_tab.click()
+
+            programs = WebDriverWait(self.browser, 30).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, f'#{data_title} tr td:first-child a')))
 
             return [p.get_attribute('href') for p in programs]
-        except:
+        except Exception as e:
+            self.logger.exception(f'Execption during getting programs refs: {e}')
             return None
 
 
     def parse_program(self, response):
-        self.logger.info("getting program info: ")
+        self.logger.info(f"getting program info from: {response.request.url}")
 
         try:
             next_program_urls = response.request.meta['program_urls']
