@@ -38,7 +38,7 @@ class CucasSpider(scrapy.Spider):
         # data to be scraped: name, level, type and location
 
         info_box = response.css('.l_t_left p a::text').getall()
-        admission = response.css('.tags li a::attr(href)').get().strip()
+        admission = response.xpath('//*[contains(text(), "Admission")]/@href').get().strip()
 
         university = {
             'name': response.css('.l_mid a::text').get(),
